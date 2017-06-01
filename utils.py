@@ -1,7 +1,6 @@
 import ConfigParser
 import json
 import urllib2
-import urlparse
 
 AMAZON_URL = "https://pitangui.amazon.com/api/notifications"
 
@@ -12,13 +11,15 @@ Config.read("settings.ini")
 def setLights(post_data):
     hue_username = Config.get('Hue', 'Username')
     hue_ip = Config.get('Hue', 'IP')
-    hue_url = urlparse.urljoin("http://", hue_ip, "/api/", hue_username, "/lights")
+    hue_url = __make_url(["http://" + hue_ip, "api", hue_username, "lights"])
     __alterLight(hue_url, Config.get('Hue', 'Lights'), post_data)
 
 
 def __alterLight(hue_url, lights, post_data):
-    for light in lights:
-        urllib2.urlopen(urlparse.urljoin(hue_url, light, "state"), post_data)
+    for light in lights.split(","):
+        request = urllib2.Request(__make_url([hue_url, light, "state"]), data=post_data)
+        request.get_method = lambda: 'PUT'
+        urllib2.urlopen(request)
 
 
 def getAlarmTime():
@@ -41,3 +42,7 @@ def getAlarmTime():
                 nextAlarm = alarm["alarmTime"]
     if nextAlarm is not -1:
         print nextAlarm / 1000  # ns -> ms
+
+
+def __make_url(l):
+    return '/'.join(l)

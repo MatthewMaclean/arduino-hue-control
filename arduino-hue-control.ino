@@ -4,8 +4,8 @@
 
 // TODO: way to turn it off
 
-int ALARM_TIME = -1;
-int HOUR_BEFORE_ALARM_TIME = -1;
+unsigned long ALARM_TIME = 0;
+unsigned long HOUR_BEFORE_ALARM_TIME = 0;
 
 Process date;
 
@@ -30,8 +30,8 @@ void setup() {
   Bridge.begin();        // initialize Bridge
   // Serial.begin(9600);    // initialize serial
   // while (!Serial);              // wait for Serial Monitor to open
-  // Serial.println(F("Time Check"));  // Title of sketch
-
+  Serial.println(F("Time Check"));  // Title of sketch
+  runStuff();
   Alarm.timerRepeat(SECONDS_PER_PHASE, runStuff);
 }
 
@@ -48,7 +48,7 @@ void loop() {
 
 void setTime() {
   String timeString = getTimeString();
-  while (getTime(timeString, getHour) == 0) {
+  while (timeString == 0) {
     timeString = getTimeString();
   }
   String dateString = getDateString();
@@ -79,15 +79,16 @@ void lightFlux() {
   float currentY = incrementFloat(STARTING_Y, FINAL_Y, currentIter, NUM_FLUX_ITER);
   int currentBrightness = incrementInt(BRIGHT_LEVEL, DIM_LEVEL, currentIter, NUM_FLUX_ITER);
 
-  alterLight(lightSettings(currentX, currentY, currentSaturation, currentBrightness));
+  alterLight(lightSettings(currentX, currentY, currentSaturation, currentBrightness, false));
 }
 
 void morningLight() {
-  int currTime = getSeconds(hour(), minute(), second());
+  unsigned long secondsSinceEpoch = getSecondsSinceEpoch();
 
-  if (ALARM_TIME < currTime) {
+  // if alarm is before current time, search for a new one
+  if (ALARM_TIME < secondsSinceEpoch) {
     // only check within a period of time to reduce calls to amazon
-    if (!withinTime(currTime, 2, 6)) {
+    if (!withinTime(hour(), 2, 6)) {
       return;
     }
 
@@ -97,18 +98,22 @@ void morningLight() {
     }
   }
 
-  int secondsSinceStart = getSeconds(hour() , minute(), second()) - HOUR_BEFORE_ALARM_TIME;
+  if (HOUR_BEFORE_ALARM_TIME > secondsSinceEpoch) {
+    return;
+  }
+  unsigned long secondsSinceStart = secondsSinceEpoch - HOUR_BEFORE_ALARM_TIME;
   int currentIter = secondsSinceStart / SECONDS_PER_PHASE + 1;
   int currentBrightness = incrementInt(0, BRIGHT_LEVEL, currentIter, NUM_MORNING_LIGHT_ITER);
 
-  alterLight(lightSettings(STARTING_X, STARTING_Y, STARTING_SATURATION, currentBrightness));
+  alterLight(lightSettings(STARTING_X, STARTING_Y, STARTING_SATURATION, currentBrightness, true));
 }
 
-String lightSettings(float x, float y, int saturation, int brightness) {
-  return "{\"xy\":[" + String(x, 4) +
-        ", " + String(y, 4) +
-        "], \"sat\": " + String(saturation) +
-        ", \"bri\": " + String(brightness) + "}";
+String lightSettings(float x, float y, int saturation, int brightness, bool on) {
+  String lightOn = on ? "\"on\": true," : "";
+  return "{" + lightOn + "\"xy\":[" + String(x, 4) +
+         ", " + String(y, 4) +
+         "], \"sat\": " + String(saturation) +
+         ", \"bri\": " + String(brightness) + "}";
 }
 
 boolean getAlarmTime() {
@@ -128,14 +133,30 @@ boolean getAlarmTime() {
     return false;
   }
 
-  ALARM_TIME = alarmTime / 1000;
+  ALARM_TIME = alarmTime;
   HOUR_BEFORE_ALARM_TIME = ALARM_TIME - getSeconds(1, 0, 0);
   return true;
 }
 
+unsigned long getSecondsSinceEpoch() {
+  Process client;
+  client.runShellCommand(F("date +%s;"));
+  unsigned long secondsSinceEpoch = 0;
+  while (client.available()) {
+    char c = client.read();
+    if (!(c >= '0' && c <= '9')) {
+      break;
+    }
+    secondsSinceEpoch *= 10;
+    secondsSinceEpoch += c - '0';
+  }
+  return secondsSinceEpoch;
+}
+
 void alterLight(String json) {
   Process client;
-  client.runShellCommand("cd ~; python -c 'from utils import setLights; setLights(\"" + json + "\");'");
+  Serial.println("cd ~; python -c 'from utils import setLights; setLights(\"\"\"" + json + "\"\"\");'");
+  client.runShellCommand("cd ~; python -c 'from utils import setLights; setLights(\"\"\"" + json + "\"\"\");'");
 }
 
 //************************//
@@ -182,7 +203,7 @@ float incrementFloat(float starting, float ending, int iter, int numIter) {
 
 bool withinTime(int curr, int s, int e) {
   if (e < s) {
-    return curr >= s || curr <= e;
+    return curr <= e || curr >= s;
   } else {
     return curr >= s && curr <= e;
   }
